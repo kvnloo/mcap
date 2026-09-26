@@ -1,4 +1,5 @@
 import struct
+import threading
 import zlib
 from io import BufferedReader, BytesIO, RawIOBase
 from typing import IO, Iterator, List, Optional, Tuple, Union
@@ -42,6 +43,21 @@ from .records import (
 MAGIC_SIZE = 8
 
 
+# One reusable ZstdDecompressor per thread. Building a fresh decompression
+# context for every chunk costs measurable CPU on small chunks; reuse
+# amortizes that setup. Thread-local so readers on different threads never
+# share decompressor state.
+_zstd_decompressor_state = threading.local()
+
+
+def _get_zstd_decompressor():
+    decompressor = getattr(_zstd_decompressor_state, "decompressor", None)
+    if decompressor is None:
+        decompressor = zstandard.ZstdDecompressor()
+        _zstd_decompressor_state.decompressor = decompressor
+    return decompressor
+
+
 class CRCValidationError(ValueError):
     def __init__(self, expected: int, actual: int, record: McapRecord):
         self.expected = expected
@@ -83,7 +99,9 @@ def get_chunk_data_stream(
     if chunk.compression == "zstd":
         if zstandard is None:
             raise UnsupportedCompressionError("zstandard")
-        data: bytes = zstandard.decompress(chunk.data, chunk.uncompressed_size)
+        data: bytes = _get_zstd_decompressor().decompress(
+            chunk.data, max_output_size=chunk.uncompressed_size
+        )
     elif chunk.compression == "lz4":
         if lz4 is None:
             raise UnsupportedCompressionError("lz4")
