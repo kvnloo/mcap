@@ -110,6 +110,11 @@ pub struct IndexedReader {
     /// If used in conjunction with `prevalidate_chunk_crcs`, the reader will return an error on any
     /// chunk record where the compressed OR decompressed length are > `limit`.
     pub record_length_limit: Option<usize>,
+    // A zstd decompression context created on the first zstd chunk and kept alive for the
+    // reader's lifetime, so chunks don't each pay the create/destroy cost of the one-shot
+    // zstd_safe::decompress(). Stays None for readers that never see a zstd chunk.
+    #[cfg(feature = "zstd")]
+    zstd_dctx: Option<zstd::zstd_safe::DCtx<'static>>,
 }
 
 fn chunk_request(
@@ -233,6 +238,8 @@ impl IndexedReader {
                 channel_ids,
             },
             record_length_limit: options.record_length_limit,
+            #[cfg(feature = "zstd")]
+            zstd_dctx: None,
         })
     }
 
@@ -343,11 +350,17 @@ impl IndexedReader {
             }
             #[cfg(feature = "zstd")]
             "zstd" => {
-                // decompress zstd into current slot
+                // decompress zstd into current slot, reusing one decompression context
+                // across chunks instead of the one-shot zstd_safe::decompress(), which
+                // builds and tears down a fresh context for every chunk.
+                let dctx = self
+                    .zstd_dctx
+                    .get_or_insert_with(zstd::zstd_safe::DCtx::create);
                 slot.buf.clear();
                 slot.buf.reserve(uncompressed_size);
-                let n =
-                    zstd::zstd_safe::decompress(&mut slot.buf, compressed_data).map_err(|err| {
+                let n = dctx
+                    .decompress(&mut slot.buf, compressed_data)
+                    .map_err(|err| {
                         McapError::DecompressionError(zstd::zstd_safe::get_error_name(err).into())
                     })?;
                 if n != uncompressed_size {

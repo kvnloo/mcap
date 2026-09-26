@@ -58,6 +58,17 @@ tokio = { version = "1", features = ["io-util", "macros", "rt", "fs"] }
 name = "reader"
 harness = false
 
+[[bench]]
+name = "zstd_reuse"
+harness = false
+required-features = ["zstd"]
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+zstd = { version = "0.13", features = ["wasm"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+zstd = { version = "0.13", features = ["zstdmt"] }
+
 [[example]]
 name = "conformance_reader_async"
 required-features = ["tokio"]
