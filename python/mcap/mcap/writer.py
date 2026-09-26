@@ -1,4 +1,5 @@
 import struct
+import threading
 import zlib
 from collections import defaultdict
 from enum import Enum, Flag, auto
@@ -45,6 +46,21 @@ from .records import (
 
 MCAP0_MAGIC = struct.pack("<8B", 137, 77, 67, 65, 80, 48, 13, 10)
 LIBRARY_IDENTIFIER = f"mcap-python/{__version__}"
+
+
+# One reusable ZstdCompressor per thread. Building a fresh compression context
+# for every chunk costs measurable CPU on small chunks; reuse amortizes that
+# setup. Thread-local so writers on different threads never share
+# compressor state.
+_zstd_compressor_state = threading.local()
+
+
+def _get_zstd_compressor():
+    compressor = getattr(_zstd_compressor_state, "compressor", None)
+    if compressor is None:
+        compressor = zstandard.ZstdCompressor()
+        _zstd_compressor_state.compressor = compressor
+    return compressor
 
 
 class CompressionType(Enum):
@@ -452,7 +468,7 @@ class Writer:
             compressed_data: bytes = lz4.frame.compress(chunk_data)  # type: ignore
         elif self.__compression == CompressionType.ZSTD:
             compression = "zstd"
-            compressed_data: bytes = zstandard.compress(chunk_data)  # type: ignore
+            compressed_data: bytes = _get_zstd_compressor().compress(chunk_data)  # type: ignore
         else:
             compression = ""
             compressed_data = chunk_data
