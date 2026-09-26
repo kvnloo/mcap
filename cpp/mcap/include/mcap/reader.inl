@@ -244,6 +244,14 @@ Status LZ4Reader::decompressAll(const std::byte* data, uint64_t compressedSize,
 // ZStdReader //////////////////////////////////////////////////////////////////
 
 #ifndef MCAP_COMPRESSION_NO_ZSTD
+ZStdReader::ZStdReader() {
+  decompressionContext_ = ZSTD_createDCtx();
+}
+
+ZStdReader::~ZStdReader() {
+  ZSTD_freeDCtx((ZSTD_DCtx*)decompressionContext_);
+}
+
 void ZStdReader::reset(const std::byte* data, uint64_t size, uint64_t uncompressedSize) {
   status_ = DecompressAll(data, size, uncompressedSize, &uncompressedData_);
 }
@@ -273,7 +281,8 @@ Status ZStdReader::DecompressAll(const std::byte* data, uint64_t compressedSize,
   // Allocate space for the decompressed data
   output->resize(uncompressedSize);
 
-  const auto status = ZSTD_decompress(output->data(), uncompressedSize, data, compressedSize);
+  const auto status = ZSTD_decompressDCtx((ZSTD_DCtx*)decompressionContext_, output->data(),
+                                          uncompressedSize, data, compressedSize);
   if (status != uncompressedSize) {
     if (ZSTD_isError(status)) {
       const auto msg =
@@ -1919,7 +1928,7 @@ void IndexedMessageReader::decompressChunk(const Chunk& chunk,
 #endif
 #ifndef MCAP_COMPRESSION_NO_ZSTD
   else if (*compression == Compression::Zstd) {
-    status_ = ZStdReader::DecompressAll(chunk.records, chunk.compressedSize, chunk.uncompressedSize,
+    status_ = zstdReader_.DecompressAll(chunk.records, chunk.compressedSize, chunk.uncompressedSize,
                                         &slot.decompressedChunk);
   }
 #endif

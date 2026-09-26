@@ -177,6 +177,9 @@ public:
   /**
    * @brief Decompresses an entire Zstd-compressed chunk into `output`.
    *
+   * Reuses a single decompression context across calls instead of allocating
+   * a fresh one per chunk.
+   *
    * @param data The Zstd-compressed input chunk.
    * @param compressedSize The size of the Zstd-compressed input.
    * @param uncompressedSize The size of the data once uncompressed.
@@ -184,15 +187,17 @@ public:
    * or 0 if the decompression encountered an error.
    * @return Status
    */
-  static Status DecompressAll(const std::byte* data, uint64_t compressedSize,
-                              uint64_t uncompressedSize, ByteArray* output);
-  ZStdReader() = default;
+  Status DecompressAll(const std::byte* data, uint64_t compressedSize,
+                       uint64_t uncompressedSize, ByteArray* output);
+  ZStdReader();
   ZStdReader(const ZStdReader&) = delete;
   ZStdReader& operator=(const ZStdReader&) = delete;
   ZStdReader(ZStdReader&&) = delete;
   ZStdReader& operator=(ZStdReader&&) = delete;
+  ~ZStdReader() override;
 
 private:
+  void* decompressionContext_ = nullptr;  // ZSTD_DCtx*
   Status status_;
   ByteArray uncompressedData_;
 };
@@ -654,6 +659,9 @@ private:
   RecordReader recordReader_;
 #ifndef MCAP_COMPRESSION_NO_LZ4
   LZ4Reader lz4Reader_;
+#endif
+#ifndef MCAP_COMPRESSION_NO_ZSTD
+  ZStdReader zstdReader_;
 #endif
   ReadMessageOptions options_;
   std::unordered_set<ChannelId> selectedChannels_;
